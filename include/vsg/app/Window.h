@@ -174,7 +174,9 @@ namespace vsg
         ref_ptr<Image> _multisampleDepthImage;
         ref_ptr<ImageView> _multisampleDepthImageView;
 
-        ref_ptr<Semaphore> _availableSemaphore;
+        // pool of acquire semaphores rotated to avoid reusing a signaled semaphore during swapchain changes
+        Semaphores _availableSemaphores;
+        std::size_t _availableSemaphoreIndex = 0;
 
         Frames _frames;
         std::vector<size_t> _indices;

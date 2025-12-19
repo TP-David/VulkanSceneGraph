@@ -52,6 +52,8 @@ Window::~Window()
 void Window::clear()
 {
     _frames.clear();
+    _availableSemaphores.clear();
+    _availableSemaphoreIndex = 0;
     _swapchain.reset();
 
     _depthImage.reset();
@@ -370,7 +372,13 @@ void Window::buildSwapchain()
     // set up framebuffer and associated resources
     auto& imageViews = _swapchain->getImageViews();
 
-    _availableSemaphore = vsg::Semaphore::create(_device, _traits->imageAvailableSemaphoreWaitFlag);
+    _availableSemaphores.clear();
+    _availableSemaphores.resize(imageViews.size());
+    for (auto& acquireSemaphore : _availableSemaphores)
+    {
+        acquireSemaphore = vsg::Semaphore::create(_device, _traits->imageAvailableSemaphoreWaitFlag);
+    }
+    _availableSemaphoreIndex = 0;
 
     size_t initial_indexValue = imageViews.size();
     for (size_t i = 0; i < imageViews.size(); ++i)
@@ -434,18 +442,19 @@ VkResult Window::acquireNextImage(uint64_t timeout)
 {
     if (!_swapchain) _initSwapchain();
 
-    if (!_availableSemaphore) _availableSemaphore = vsg::Semaphore::create(_device, _traits->imageAvailableSemaphoreWaitFlag);
-
     // check the dimensions of the swapchain and window extents are consistent, if not return a VK_ERROR_OUT_OF_DATE_KHR
     if (_swapchain->getExtent() != _extent2D) return VK_ERROR_OUT_OF_DATE_KHR;
 
+    auto& acquireSemaphore = _availableSemaphores[_availableSemaphoreIndex];
+    _availableSemaphoreIndex = (_availableSemaphoreIndex + 1) % _availableSemaphores.size();
+
     uint32_t nextImageIndex;
-    VkResult result = _swapchain->acquireNextImage(timeout, _availableSemaphore, {}, nextImageIndex);
+    VkResult result = _swapchain->acquireNextImage(timeout, acquireSemaphore, {}, nextImageIndex);
 
     if (result == VK_SUCCESS)
     {
-        // the acquired image's semaphore must be available now so make it the new _availableSemaphore and set its entry to the one to use for the next frame by swapping ref_ptr<>'s
-        _availableSemaphore.swap(_frames[nextImageIndex].imageAvailableSemaphore);
+        // rotate the acquire semaphore into the frame entry so we don't reuse a signaled semaphore too soon
+        acquireSemaphore.swap(_frames[nextImageIndex].imageAvailableSemaphore);
 
         if (!_frames[nextImageIndex].renderFinishedSemaphore)
             _frames[nextImageIndex].renderFinishedSemaphore = vsg::Semaphore::create(_device);
